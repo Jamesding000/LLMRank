@@ -6,6 +6,24 @@ import os
 true=True
 false=False
 
+# price estimation: 2.7 Dollar / Hour running evaluate.py
+import yaml
+def load_openai_config(file_path="openai_api.yaml"):
+    with open(file_path, "r") as file:
+        config = yaml.safe_load(file)
+    return config
+
+config = load_openai_config()
+
+# Initialize the OpenAI client
+client = openai.OpenAI(
+    api_key=config.get("api_key"),
+    base_url=config.get("api_base"),
+)
+
+# Example usage of the client
+print("Client initialized with base_url:", config.get("api_base"))
+
 def check_path(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -31,44 +49,45 @@ async def dispatch_openai_requests(
         messages_list: List of messages to be sent to OpenAI ChatCompletion API.
         model: OpenAI model to use.
         temperature: Temperature to use for the model.
-        max_tokens: Maximum number of tokens to generate.
-        top_p: Top p to use for the model.
     Returns:
         List of responses from OpenAI API.
     """
-    async_responses = [
-        openai.ChatCompletion.acreate(
+    async def create_completion(messages):
+        return client.chat.completions.create(
             model=model,
-            messages=x,
-            temperature=temperature
+            messages=messages,
+            temperature=temperature,
         )
-        for x in messages_list
-    ]
-    return await asyncio.gather(*async_responses)
-
+    
+    # Create a list of tasks for async requests
+    tasks = [create_completion(messages) for messages in messages_list]
+    
+    # Gather results
+    return await asyncio.gather(*tasks)
 
 def dispatch_single_openai_requests(
     message,
     model: str,
     temperature: float
 ):
-    """Dispatches requests to OpenAI API asynchronously.
-    
+    """
+    Dispatches a single request to OpenAI API synchronously.
+
     Args:
-        messages_list: List of messages to be sent to OpenAI ChatCompletion API.
+        message: List of messages to be sent to OpenAI ChatCompletion API.
         model: OpenAI model to use.
         temperature: Temperature to use for the model.
-        max_tokens: Maximum number of tokens to generate.
-        top_p: Top p to use for the model.
+
     Returns:
-        List of responses from OpenAI API.
+        Response from OpenAI API.
     """
-    responses = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model=model,
         messages=message,
-        temperature=temperature
+        temperature=temperature,
     )
-    return responses
+
+    return response
 
 
 amazon_dataset2fullname = {
