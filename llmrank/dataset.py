@@ -4,7 +4,184 @@ import numpy as np
 import torch
 import torch.nn as nn
 from recbole.data.dataset import SequentialDataset
+from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
+from recbole.data.interaction import Interaction
 
+class LLMRankerDataset(Dataset):
+    def __init__(self, config, dataset):
+        super().__init__()
+        self.dataset = dataset
+        self.config = config
+        self.selected_user_suffix = config['selected_user_suffix']
+        self.data_path = config['data_path']
+        self.recall_budget = config['recall_budget']
+        self.user_token2id = dataset.field2token_id['user_id']
+        self.item_token2id = dataset.field2token_id['item_id']
+        self.selected_uids, self.sampled_items = self.load_selected_users(config, dataset)
+        self.item_text = self.load_text(config, dataset)
+        self.boots = config['boots']
+        self.max_his_len = config['max_his_len']
+        self.interactions = None
+        self.candidates = None
+
+    def load_selected_users(self, config, dataset):
+        selected_users = []
+        sampled_items = []
+        selected_user_file = os.path.join(config['data_path'], f'{config["dataset"]}.{self.selected_user_suffix}')
+        user_token2id = dataset.field2token_id['user_id']
+        item_token2id = dataset.field2token_id['item_id']
+        with open(selected_user_file, 'r', encoding='utf-8') as file:
+            for line in file:
+                uid, iid_list = line.strip().split('\t')
+                selected_users.append(uid)
+                sampled_items.append([item_token2id[_] if (_ in item_token2id) else 0 for _ in iid_list.split(' ')])
+        selected_uids = list([user_token2id[_] for _ in selected_users])
+        return selected_uids, sampled_items
+
+    def load_text(self, config, dataset):
+        token_text = {}
+        item_text = ['[PAD]']
+        feat_path = os.path.join(config['data_path'], f'{dataset.dataset_name}.item')
+        if dataset.dataset_name in ['ml-1m', 'ml-1m-full']:
+            with open(feat_path, 'r', encoding='utf-8') as file:
+                file.readline()
+                for line in file:
+                    item_id, movie_title, _, _ = line.strip().split('\t')
+                    token_text[item_id] = movie_title
+            for token in dataset.field2id_token['item_id']:
+                if token == '[PAD]': continue
+                raw_text = token_text.get(token, '')
+                if raw_text.endswith(', The'):
+                    raw_text = 'The ' + raw_text[:-5]
+                elif raw_text.endswith(', A'):
+                    raw_text = 'A ' + raw_text[:-3]
+                item_text.append(raw_text)
+        elif dataset.dataset_name in ['Games', 'Games-6k']:
+            with open(feat_path, 'r', encoding='utf-8') as file:
+                file.readline()
+                for line in file:
+                    item_id, title = line.strip().split('\t')
+                    token_text[item_id] = title
+            for token in dataset.field2id_token['item_id']:
+                if token == '[PAD]': continue
+                item_text.append(token_text.get(token, ''))
+        else:
+            raise NotImplementedError()
+        return item_text
+
+    def build(self, data):
+        if self.config["eval_type"] == "RANKING":
+            self.tot_item_num = data._dataset.item_num
+
+        iter_data = (
+            tqdm(
+                data,
+                total=len(data),
+                ncols=100,
+                desc="Evaluate",
+            )
+        )
+        unsorted_selected_interactions = []
+        unsorted_selected_pos_i = []
+        for batch_idx, batched_data in enumerate(iter_data):
+            interaction, history_index, positive_u, positive_i = batched_data
+            for i in range(len(interaction)):
+                if interaction['user_id'][i].item() in self.selected_uids:
+                    pr = self.selected_uids.index(interaction['user_id'][i].item())
+                    unsorted_selected_interactions.append((interaction[i], pr))
+                    unsorted_selected_pos_i.append((positive_i[i], pr))
+        unsorted_selected_interactions.sort(key=lambda t: t[1])
+        unsorted_selected_pos_i.sort(key=lambda t: t[1])
+        selected_interactions = [_[0] for _ in unsorted_selected_interactions]
+        selected_pos_i = [_[0] for _ in unsorted_selected_pos_i]
+        new_inter = {
+            col: torch.stack([inter[col] for inter in selected_interactions]) for col in selected_interactions[0].columns
+        }
+        selected_interactions = Interaction(new_inter)
+        selected_pos_i = torch.stack(selected_pos_i)
+        selected_pos_u = torch.arange(selected_pos_i.shape[0])
+
+        if self.config['has_gt']:
+            print('Has ground truth.')
+            idxs = torch.LongTensor(self.sampled_items)
+            for i in range(idxs.shape[0]):
+                if selected_pos_i[i] in idxs[i]:
+                    pr = idxs[i].numpy().tolist().index(selected_pos_i[i].item())
+                    idxs[i][pr:-1] = torch.clone(idxs[i][pr+1:])
+
+            idxs = idxs[:,:self.recall_budget - 1]
+            if self.config['fix_pos'] == -1 or self.config['fix_pos'] == self.recall_budget - 1:
+                idxs = torch.cat([idxs, selected_pos_i.unsqueeze(-1)], dim=-1).numpy()
+            elif self.config['fix_pos'] == 0:
+                idxs = torch.cat([selected_pos_i.unsqueeze(-1), idxs], dim=-1).numpy()
+            else:
+                idxs_a, idxs_b = torch.split(idxs, (self.config['fix_pos'], self.recall_budget - 1 - self.config['fix_pos']), dim=-1)
+                idxs = torch.cat([idxs_a, selected_pos_i.unsqueeze(-1), idxs_b], dim=-1).numpy()
+        else:
+            print('Does not have ground truth.')
+            idxs = torch.LongTensor(self.sampled_items)
+            idxs = idxs[:,:self.recall_budget]
+            idxs = idxs.numpy()
+
+        if self.config['fix_pos'] == -1:
+            print('Shuffle ground truth')
+            for i in range(idxs.shape[0]):
+                np.random.shuffle(idxs[i])
+
+        self.interactions = selected_interactions
+        self.candidates = idxs
+
+    def __len__(self):
+        return len(self.interactions)
+
+    def __getitem__(self, idx):
+        # interaction = self.interactions[idx]
+        # candidates = self.candidates[idx]
+        user_his_text, candidate_text, candidate_text_order, candidate_idx = self.get_batch_inputs(self.interactions, self.candidates, idx)
+        prompt = self.construct_prompt(self.dataset.dataset_name, user_his_text, candidate_text_order)
+        return prompt
+
+    def get_batch_inputs(self, interaction, idxs, i):
+        user_his = interaction['item_id_list']
+        user_his_len = interaction['item_length']
+        origin_batch_size = user_his.size(0)
+        real_his_len = min(self.max_his_len, user_his_len[i % origin_batch_size].item())
+        user_his_text = [str(j) + '. ' + self.item_text[user_his[i % origin_batch_size, user_his_len[i % origin_batch_size].item() - real_his_len + j].item()] \
+                for j in range(real_his_len)]
+        candidate_text = [self.item_text[idxs[i,j]]
+                for j in range(idxs.shape[1])]
+        candidate_text_order = [str(j) + '. ' + self.item_text[idxs[i,j].item()]
+                for j in range(idxs.shape[1])]
+        candidate_idx = idxs[i].tolist()
+
+        return user_his_text, candidate_text, candidate_text_order, candidate_idx
+
+    def construct_prompt(self, dataset_name, user_his_text, candidate_text_order):
+        if dataset_name in ['ml-1m', 'ml-1m-full']:
+            prompt = f"I've watched the following movies in the past in order:\n{user_his_text}\n\n" \
+                    f"Now there are {self.recall_budget} candidate movies that I can watch next:\n{candidate_text_order}\n" \
+                    f"Please rank these {self.recall_budget} movies by measuring the possibilities that I would like to watch next most, according to my watching history. Please think step by step.\n" \
+                    f"Please show me your ranking results with order numbers. Split your output with line break. You MUST rank the given candidate movies. You can not generate movies that are not in the given candidate list."
+        elif dataset_name in ['Games', 'Games-6k']:
+            prompt = f"I've purchased the following products in the past in order:\n{user_his_text}\n\n" \
+                    f"Now there are {self.recall_budget} candidate products that I can consider to purchase next:\n{candidate_text_order}\n" \
+                    f"Please rank these {self.recall_budget} products by measuring the possibilities that I would like to purchase next most, according to the given purchasing records. Please think step by step.\n" \
+                    f"Please show me your ranking results with order numbers. Split your output with line break. You MUST rank the given candidate movies. You can not generate movies that are not in the given candidate list."
+        else:
+            raise NotImplementedError(f'Unknown dataset [{dataset_name}].')
+        return prompt
+
+'''
+# Example Usage:
+
+movie_dataset = MovieRecommendationDataset(config, dataset)
+movie_dataset.build(test_data)
+
+dataloader = DataLoader(movie_dataset, batch_size=8)
+
+
+'''
 
 class UniSRecDataset(SequentialDataset):
     def __init__(self, config):
