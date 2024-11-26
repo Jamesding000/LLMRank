@@ -12,6 +12,9 @@ from recbole.utils.case_study import full_sort_topk
 
 from utils import get_model
 
+import nltk
+nltk.download('punkt_tab')
+  
 
 def write_sampled_candidates_to_file(selected_users, recall_items, dataset, file):
     assert len(selected_users) == recall_items.shape[0]
@@ -22,7 +25,7 @@ def write_sampled_candidates_to_file(selected_users, recall_items, dataset, file
 
 def sample_candidates(dataset_name, strategy, n_users, n_cands, **kwargs):
     strategy2model_name = {
-        'random': 'SASRec',
+        'random': 'SASRec', # why?
         'bm25': 'BM25',
         'bert': 'Rank',
         'pop': 'Pop',

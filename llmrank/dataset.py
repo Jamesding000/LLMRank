@@ -128,6 +128,8 @@ class LLMRankerDataset(Dataset):
             print('Shuffle ground truth')
             for i in range(idxs.shape[0]):
                 np.random.shuffle(idxs[i])
+        
+        # Keep track of ground truth, for later use in constructing grouth truth ranking.
 
         self.interactions = selected_interactions
         self.candidates = idxs
