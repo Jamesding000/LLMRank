@@ -13,7 +13,7 @@ class LLMRankerDataset(Dataset):
         super().__init__()
         self.dataset = dataset
         self.config = config
-        self.selected_user_suffix = config['selected_user_suffix']
+        self.selected_user_suffix = config['selected_user_suffix'] + '_train'
         self.data_path = config['data_path']
         self.recall_budget = config['recall_budget']
         self.user_token2id = dataset.field2token_id['user_id']
@@ -105,8 +105,14 @@ class LLMRankerDataset(Dataset):
         if self.config['has_gt']:
             print('Has ground truth.')
             idxs = torch.LongTensor(self.sampled_items)
+            
+            # self.ground_truth_items = []
+            
             for i in range(idxs.shape[0]):
                 if selected_pos_i[i] in idxs[i]:
+                    
+                    # self.ground_truth_items.append(selected_pos_i[i].item())  # Keep track of ground truth
+                    
                     pr = idxs[i].numpy().tolist().index(selected_pos_i[i].item())
                     idxs[i][pr:-1] = torch.clone(idxs[i][pr+1:])
 
@@ -133,6 +139,7 @@ class LLMRankerDataset(Dataset):
 
         self.interactions = selected_interactions
         self.candidates = idxs
+        self.ground_truth_items = selected_pos_i
 
     def __len__(self):
         return len(self.interactions)
@@ -142,7 +149,12 @@ class LLMRankerDataset(Dataset):
         # candidates = self.candidates[idx]
         user_his_text, candidate_text, candidate_text_order, candidate_idx = self.get_batch_inputs(self.interactions, self.candidates, idx)
         prompt = self.construct_prompt(self.dataset.dataset_name, user_his_text, candidate_text_order)
-        return prompt
+        # Get the "answer" text
+        answer_text = self.construct_answer_text(idx)
+
+        # Combine prompt and answer for fine-tuning
+        full_text = prompt + "\n\n" + answer_text
+        return full_text
 
     def get_batch_inputs(self, interaction, idxs, i):
         user_his = interaction['item_id_list']
@@ -174,6 +186,26 @@ class LLMRankerDataset(Dataset):
             raise NotImplementedError(f'Unknown dataset [{dataset_name}].')
         return prompt
 
+    def construct_answer_text(self, idx):
+        # Get the candidates and the ground truth
+        candidates = self.candidates[idx]
+        ground_truth = self.ground_truth_items[idx]
+        
+        # print('ground_truth', ground_truth)
+        # print('candidates', candidates)
+        assert ground_truth in candidates, "Ground truth not found in candidates!"
+
+        # Shuffle the rest of the candidates
+        remaining_candidates = [item for item in candidates if item != ground_truth]
+        np.random.shuffle(remaining_candidates)
+
+        # Construct the ranked list with ground truth at the top
+        ranked_order = [ground_truth] + remaining_candidates
+
+        # Create the "answer" text
+        ranked_order_text = "\n".join([f"{i+1}. {self.item_text[item]}" for i, item in enumerate(ranked_order)])
+        return ranked_order_text
+    
 '''
 # Example Usage:
 

@@ -1,7 +1,7 @@
-eval_args:
-  split: {'LS': 'valid_and_test'}
-  order: TO
-  mode: full
+# eval_args:
+#   split: {'LS': 'valid_and_test'}
+#   order: TO
+#   mode: full
 repeatable: True
 loss_type: CE
 
@@ -12,7 +12,8 @@ metrics: ["Recall", "NDCG"]
 topk: [1, 5, 10, 20, 50]
 
 train_neg_sample_args: ~
-selected_user_suffix: random
+selected_user_suffix: bm25 #random
 recall_budget: 20
 has_gt: True
 fix_pos: -1
+llm_eval_batch_size: 8

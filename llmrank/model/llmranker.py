@@ -59,6 +59,7 @@ class LLMRanker(SequentialRecommender):
         self.model = model.to(config['device'])
         self.model.eval()
         self.tokenizer = tokenizer
+        self.llm_batch_size = config['llm_eval_batch_size']
 
         self.config = config
         self.max_tokens = config['max_tokens']
@@ -146,8 +147,8 @@ class LLMRanker(SequentialRecommender):
         :return:
         """
         
-        print('interaction', interaction)
-        print('idx', idxs)
+        # print('interaction', interaction)
+        # print('idx', idxs)
         
         origin_batch_size = idxs.shape[0]
         if self.boots:
@@ -159,8 +160,8 @@ class LLMRanker(SequentialRecommender):
         batch_size = idxs.shape[0]
         pos_items = interaction[self.POS_ITEM_ID]
         
-        batch_size = 5 # Test on only 5 examples
-        pos_items = pos_items[:5]
+        # batch_size = 5 # Test on only 5 examples
+        # pos_items = pos_items[:5]
         
         print('############ Batch Size:', batch_size)
         
@@ -175,33 +176,34 @@ class LLMRanker(SequentialRecommender):
             
             prompt_list.append(prompt)
         
-        print('prompt_list', len(prompt_list), prompt_list)
+        # print('prompt_list', len(prompt_list), prompt_list)
         
         # if 'llama' in self.api_model_name:
         #     openai_responses = self.dispatch_replicate_api_requests(prompt_list, batch_size)
         # else:
         #     openai_responses = self.dispatch_openai_api_requests(prompt_list, batch_size)
         
-        responses = self.get_batch_outputs(prompt_list, batch_size)    
+        responses = self.get_batch_outputs(prompt_list, self.llm_batch_size)    
             
         save_responses_to_file(responses, f"responses_{self.api_model_name}.json")
 
         scores = torch.full((idxs.shape[0], self.n_items), -10000.)
+        
         for i, response in enumerate(tqdm(responses)):
 
             user_his_text, candidate_text, candidate_text_order, candidate_idx = self.get_batch_inputs(interaction, idxs, i)
 
             response_list = response.split('\n')
             
-            print('response_list', len(response_list), response_list)
+            # print('response_list', len(response_list), response_list)
             
             # example:
             # ['1. Just the Ticket', '2. Victor/Victoria', "3. Love's Labour's Lost", '4. Sweet Nothing', '5. Passion Fish', "6. There's Something About Mary", '7. The Masque of the Red Death', '8. Friday the 13th Part VIII: Jason Takes Manhattan', '9. Fantasia', '10. Eyes Without a Face', '11. One False Move', '12. Double Indemnity', '13. Muppets From Space', '14. Instinct', '15. Heartburn', '16. The Cowboy Way', '17. Went to Coney Island on a Mission From God... Be Back by Five', '18. Beefcake', '19. Kronos', '20. Single Girl, A (La Fille Seule)']
             
-            self.logger.info(prompt_list[i])
-            self.logger.info(response)
-            self.logger.info(f'Here are candidates: {candidate_text}')
-            self.logger.info(f'Here are answer: {response_list}')
+            # self.logger.info(prompt_list[i])
+            # self.logger.info(response)
+            # self.logger.info(f'Here are candidates: {candidate_text}')
+            # self.logger.info(f'Here are answer: {response_list}')
             
             if self.dataset_name in ['ml-1m', 'ml-1m-full']:
                 rec_item_idx_list = self.parsing_output_text(scores, i, response_list, idxs, candidate_text)
@@ -222,10 +224,10 @@ class LLMRanker(SequentialRecommender):
                     #     retry_flag = -1
                     #     pass
                     # else:
-                    #     self.logger.info(f'Fail to find ground-truth items.')
-                    #     print(target_text)
-                    #     print(rec_item_idx_list)
-                    #     print(f'Remaining {retry_flag} times to retry.')
+                    self.logger.info(f'Fail to find ground-truth items.')
+                    print(target_text)
+                    print(rec_item_idx_list)
+                    # print(f'Remaining {retry_flag} times to retry.')
                     #     retry_flag -= 1
                     #     while True:
                     #         try:
@@ -235,7 +237,6 @@ class LLMRanker(SequentialRecommender):
                     #             print(f'Error {e}, retry at {time.ctime()}', flush=True)
                     #             time.sleep(20)
                     
-                    self.logger.info(f'Fail to find ground-truth items.')
                     
             # else:
             #     retry_flag = -1
@@ -243,6 +244,7 @@ class LLMRanker(SequentialRecommender):
         if self.boots:
             scores = scores.view(self.boots,-1,scores.size(-1))
             scores = scores.sum(0)
+        
         return scores
 
     def get_batch_inputs(self, interaction, idxs, i):
@@ -321,12 +323,32 @@ class LLMRanker(SequentialRecommender):
     #     return responses
     
     def get_batch_outputs(self, prompts, batch_size):
+        """
+        Process prompts in batches and return the decoded responses.
         
+        Args:
+            prompts (list): List of prompts to process.
+            batch_size (int): Size of each batch.
+            
+        Returns:
+            list: Decoded responses for all prompts.
+        """
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        
-        inputs = self.tokenizer(
-                prompts,
+
+        all_responses = []  # To store the gathered responses
+
+        # Split prompts into batches
+        # Initialize the progress bar
+        progress_bar = tqdm(range(0, len(prompts), batch_size), desc="Processing batches", ncols=100)
+
+        # Split prompts into batches
+        for i in progress_bar:
+            batch_prompts = prompts[i:i + batch_size]  # Get the current batch
+            
+            # Tokenize the batch
+            inputs = self.tokenizer(
+                batch_prompts,
                 return_tensors='pt',
                 return_token_type_ids=False,
                 padding=True,          # Pad to the longest sequence in the batch
@@ -334,18 +356,18 @@ class LLMRanker(SequentialRecommender):
                 max_length=512         # Optional: Adjust max_length as needed
             ).to(self.config['device'])
 
-        # Generate responses
-        responses = self.model.generate(
-            **inputs,
-            max_new_tokens=self.max_tokens,
-            temperature=self.temperature,
-        )
+            # Generate responses for the current batch
+            responses = self.model.generate(
+                **inputs,
+                max_new_tokens=self.max_tokens,
+                temperature=self.temperature,
+            )
 
-        # Decode the batch of responses
-        response_decoded = self.tokenizer.batch_decode(responses, skip_special_tokens=True)
-        
-        return response_decoded
-            
+            # Decode the responses and add to the result list
+            batch_responses = self.tokenizer.batch_decode(responses, skip_special_tokens=True)
+            all_responses.extend(batch_responses)
+
+        return all_responses
     
     # def get_batch_outputs(self, prompts, batch_size):
     #     # Initialize vLLM model (make sure this is done once; move it outside if reused)
