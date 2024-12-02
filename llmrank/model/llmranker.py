@@ -160,8 +160,8 @@ class LLMRanker(SequentialRecommender):
         batch_size = idxs.shape[0]
         pos_items = interaction[self.POS_ITEM_ID]
         
-        # batch_size = 5 # Test on only 5 examples
-        # pos_items = pos_items[:5]
+        batch_size = 1 # Test on only 5 examples
+        pos_items = pos_items[:1]
         
         print('############ Batch Size:', batch_size)
         
@@ -355,7 +355,7 @@ class LLMRanker(SequentialRecommender):
                 truncation=True,       # Truncate inputs that exceed the model's max length
                 max_length=512         # Optional: Adjust max_length as needed
             ).to(self.config['device'])
-
+            
             # Generate responses for the current batch
             responses = self.model.generate(
                 **inputs,

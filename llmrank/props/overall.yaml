@@ -17,3 +17,4 @@ recall_budget: 20
 has_gt: True
 fix_pos: -1
 llm_eval_batch_size: 8
+gpu_id: 3

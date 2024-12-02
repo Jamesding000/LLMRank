@@ -16,9 +16,6 @@ MODEL_MAP = {
     "gpt-neo":"gpt-neo-1.3B" #"EleutherAI/gpt-neo-1.3B"
 }
 
-model_name = "llama3"
-dataset_name = 'ml-1m-full'
-
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
