@@ -3,6 +3,7 @@ import asyncio
 import openai
 from recbole.utils import get_model as recbole_get_model
 import os
+import json
 true=True
 false=False
 
@@ -121,4 +122,38 @@ amazon_dataset2fullname = {
     'Toys': 'Toys_and_Games',
     'Games': 'Video_Games'
 }
+
+
+def save_responses_to_file(responses, file_path="openai_responses.json"):
+    """
+    Save OpenAI responses to a file after making them JSON serializable.
+
+    Args:
+        responses: The OpenAI responses to save.
+        file_path: The file path to save the responses (default: 'openai_responses.json').
+    """
+    # Extract serializable parts of responses
+    serializable_responses = [
+        response.to_dict() if hasattr(response, "to_dict") else response
+        for response in responses
+    ]
+    
+    with open(file_path, "w") as file:
+        json.dump(serializable_responses, file, indent=4)
+    
+    print(f"Responses saved to {file_path}")
+
+
+def save_prompt_list_to_file(prompt_list, file_path="prompts.json"):
+    """
+    Save a list of strings to a file by dumping it as JSON.
+
+    Args:
+        prompt_list: List of strings to save.
+        file_path: Path to the file (default: 'prompts.json').
+    """
+    with open(file_path, "w") as file:
+        json.dump(prompt_list, file, indent=4)  # Save as JSON array
+    print(f"Prompts saved to {file_path}")
+
 

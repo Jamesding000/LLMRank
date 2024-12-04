@@ -93,3 +93,64 @@ The experiments are conducted using the open-source recommendation library [RecB
 We use the released pre-trained models of [UniSRec](https://github.com/RUCAIBox/UniSRec) and [VQ-Rec](https://github.com/RUCAIBox/VQ-Rec) in our zero-shot recommendation benchmarks.
 
 Thanks [@neubig](https://github.com/neubig) for the amazing implementation of asynchronous dispatching OpenAI APIs. [[code]](https://gist.github.com/neubig/80de662fb3e225c18172ec218be4917a)
+
+
+## Below is for 11667 Project 6
+
+# LLMRank: Fine-tuning and Evaluation Framework
+
+This repository provides a framework for fine-tuning and evaluating LLM models on custom datasets. 
+
+## Table of Contents
+1. [Setup](#setup)
+2. [Downloading Pretrained Models](#downloading-pretrained-models)
+3. [Fine-tuning](#fine-tuning)
+4. [Evaluation](#evaluation)
+5. [Configuring Models and Datasets](#configuring-models-and-datasets)
+
+---
+
+## Setup
+Navigate to the project llmrank directory:
+`cd llmrank`
+
+Install the required dependencies:
+`pip install -r requirements.txt`
+
+---
+
+## Downloading Pretrained Models
+To download pretrained models, run:
+`python get_pretrained_models.py`
+
+---
+
+## Fine-tuning
+To fine-tune a pretrained model, use the following command:
+`python finetune.py -m MODEL_NAME -d DATASET -g GPU_ID`
+
+### Example:
+`python finetune.py -m llama3 -d ml-1m-full -g 0`
+
+### Supported Model Names:
+- llama3
+- gpt-neo
+
+Modify the fine-tuning configuration files in the `configs` directory to customize the training process.
+
+---
+
+## Evaluation
+To evaluate a fine-tuned model, use the following command:
+`python evaluate_llm.py -m MODEL_NAME -d DATASET -p FINETUNED_MODEL_PATH`
+
+### Example:
+`python evaluate_llm.py -m llama3 -d ml-1m -p models/Llama-3.2-1B-sft`
+
+---
+
+## Configuring Models and Datasets
+Fine-tuning and evaluation configurations can be modified in the `configs` directory. 
+Adjust parameters like learning rate, batch size, and model settings to suit your requirements.
+
+---

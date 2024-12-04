@@ -1,11 +1,12 @@
 import os
 import numpy as np
 from tqdm import tqdm
+import math
 import torch
+from collections import OrderedDict
 from recbole.trainer import Trainer
 from recbole.utils import EvaluatorType, set_color
 from recbole.data.interaction import Interaction
-
 
 class SelectedUserTrainer(Trainer):
     def __init__(self, config, model, dataset):
@@ -93,14 +94,33 @@ class SelectedUserTrainer(Trainer):
             self.logger.info('Shuffle ground truth')
             for i in range(idxs.shape[0]):
                 np.random.shuffle(idxs[i])
-        scores = self.model.predict_on_subsets(selected_interactions.to(self.device), idxs)
-        scores = scores.view(-1, self.tot_item_num)
-        scores[:, 0] = -np.inf
-        self.eval_collector.eval_batch_collect(
-            scores, selected_interactions, selected_pos_u, selected_pos_i
-        )
-        self.eval_collector.model_collect(self.model)
-        struct = self.eval_collector.get_data_struct()
-        result = self.evaluator.evaluate(struct)
+            
+        rankings = self.model.predict_on_subsets(selected_interactions.to(self.device), idxs)
+        
+        print(f'Returned rankings {rankings}')
+        def compute_metrics(rankings, ks):
+            result = OrderedDict()
+            total_queries = len(rankings)
+
+            for k in ks:
+                # Compute Recall@k
+                hits = sum(1 for r in rankings if r >= 0 and r < k)
+                recall = hits / total_queries
+                result[f"recall@{k}"] = recall
+
+            for k in ks:
+                # Compute NDCG@k
+                dcg = 0.0
+                for r in rankings:
+                    if r >= 0 and r < k:
+                        dcg += 1 / math.log2(r + 2)
+                ndcg = dcg / total_queries
+                result[f"ndcg@{k}"] = ndcg
+
+            self.wandblogger.log_eval_metrics(result, head="eval")
+            return result
+        
+        result = compute_metrics(rankings, [1, 5, 10, 20])
+        
         self.wandblogger.log_eval_metrics(result, head="eval")
         return result

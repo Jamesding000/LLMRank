@@ -1,10 +1,10 @@
 {   
     "model_to_train": "models/gpt-neo-1.3B",
-    "output_dir": "models/gpt-neo-1.3B-sft",
-    "run_name": "models/gpt-neo-1.3B-sft",
+    "output_dir": "models/gpt-neo-1.3B-sft3",
+    "run_name": "models/gpt-neo-1.3B-sft3",
     "report_to": "wandb",
     "logging_steps": 1,
-    "num_train_epochs": 10,
+    "num_train_epochs": 6,
     "save_strategy": "no",
     "eval_strategy": "epoch",
     "bf16": true,

@@ -1,46 +1,32 @@
-import importlib
-import argparse
 import os
-from logging import getLogger
-import torch
-from recbole.config import Config
-from recbole.data import data_preparation
-from recbole.data.dataset.sequential_dataset import SequentialDataset
-from recbole.utils import init_seed, init_logger, get_trainer, set_color
-from model import llmranker  # Ensure you import the module's parent package
-from model.llmranker import LLMRanker  # Re-import the specific class
-from dataset import LLMRankerDataset
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.data import random_split, DataLoader
-from transformers import AutoModelForCausalLM, Trainer, TrainingArguments
+import json
+import logging
+import argparse
+from dataclasses import dataclass, field
+from typing import List, Union, Dict
 
+import torch
+from torch.utils.data import random_split, DataLoader
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    DataCollatorForLanguageModeling,
     Trainer,
     TrainingArguments,
     HfArgumentParser
 )
-
-import logging
-from dataclasses import dataclass, field
-
-import argparse
-import json
-from typing import List, Union, Dict
 from tqdm import tqdm
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import os
+
+from recbole.config import Config
+from recbole.data import data_preparation
+from recbole.data.dataset.sequential_dataset import SequentialDataset
+from recbole.utils import init_seed
+from model.llmranker import LLMRanker
+from dataset import LLMRankerDataset
 
 MODEL_MAP = {
-    "llama3": "Llama-3.2-1B",  #"meta-llama/Llama-3.2-1B"
-    "gpt-neo":"gpt-neo-1.3B" #"EleutherAI/gpt-neo-1.3B"
+    "llama3": "Llama-3.2-1B",
+    "gpt-neo": "gpt-neo-1.3B"
 }
-
-model_name = "llama3"
-dataset_name = 'ml-1m-full'
 
 def finetune(model_name, dataset_name, **kwargs):
     
@@ -49,11 +35,11 @@ def finetune(model_name, dataset_name, **kwargs):
         Tokenizes the text batch for fine-tuning.
         """
         inputs = tokenizer(
-            batch,                # Concatenated input + target strings
-            padding=True,         # Pad to the longest sequence in the batch
-            truncation=True,      # Truncate sequences exceeding the max length
-            max_length=512,       # Adjust based on model's context length
-            return_tensors="pt",  # Return PyTorch tensors
+            batch,                
+            padding=True,         
+            truncation=True,      
+            max_length=512,       
+            return_tensors="pt", 
         )
 
         # Create labels for loss calculation, masking input tokens
@@ -63,23 +49,22 @@ def finetune(model_name, dataset_name, **kwargs):
         return {
             "input_ids": inputs["input_ids"],
             "attention_mask": attention_mask,
-            "labels": labels,  # Loss is computed on these
+            "labels": labels,
         }
         
     props = [f'props/{model_name}.yaml', f'props/{dataset_name}.yaml', 'openai_api.yaml', 'props/overall.yaml']
     print(props)
-    # model_class = get_model(model_name)
 
     model_class = LLMRanker
     model_path = os.path.join('./models', MODEL_MAP[model_name])
 
-    # configurations initialization
+    # initialize config
     config = Config(model=model_class, dataset=dataset_name, config_file_list=props, config_dict=kwargs)
     init_seed(config['seed'], config['reproducibility'])
     
     dataset = SequentialDataset(config)
     
-    # dataset splitting
+    # We take the full interaction sequence for each user as our training dataset
     train_data, valid_data, test_data = data_preparation(config, dataset)
 
     movie_dataset = LLMRankerDataset(config, dataset)
@@ -87,13 +72,11 @@ def finetune(model_name, dataset_name, **kwargs):
 
     # Define split ratios
     train_ratio = 0.9
-
-    # Calculate sizes of each split
     total_size = len(movie_dataset)
     train_size = int(total_size * train_ratio)
-    valid_size = total_size - train_size  # Ensure all samples are used
+    valid_size = total_size - train_size
 
-    # Perform the split
+    # Perform splitting on users
     train_dataset, valid_dataset = random_split(
         movie_dataset, 
         [train_size, valid_size], 

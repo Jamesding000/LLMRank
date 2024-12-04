@@ -1,36 +1,27 @@
 import argparse
+import logging
+import os
 from logging import getLogger
+from dataclasses import dataclass, field
+
 import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer, HfArgumentParser
+
 from recbole.config import Config
 from recbole.data import data_preparation
 from recbole.data.dataset.sequential_dataset import SequentialDataset
-from recbole.utils import init_seed, init_logger, get_trainer, set_color
+from recbole.utils import init_seed, init_logger, set_color
 from utils import get_model
 from trainer import SelectedUserTrainer
 from model.llmranker import LLMRanker
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import os
-
-MODEL_MAP = {
-    "llama3": "Llama-3.2-1B",  #"meta-llama/Llama-3.2-1B"
-    "gpt-neo":"gpt-neo-1.3B" #"EleutherAI/gpt-neo-1.3B"
-}
-
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    DataCollatorForLanguageModeling,
-    Trainer,
-    TrainingArguments,
-    HfArgumentParser
-)
-
-import logging
-from dataclasses import dataclass, field
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+MODEL_MAP = {
+    "llama3": "Llama-3.2-1B",
+    "gpt-neo": "gpt-neo-1.3B"
+}
 
 @dataclass
 class ModelConfig:
@@ -42,13 +33,13 @@ def evaluate(model_name, dataset_name, model_path, **kwargs):
     # configurations initialization
     props = [f'props/{model_name}.yaml', f'props/{dataset_name}.yaml', 'openai_api.yaml', 'props/overall.yaml']
     print(props)
-    # model_class = get_model(model_name)
-
+    
     model_class = LLMRanker
 
     # configurations initialization
     config = Config(model=model_class, dataset=dataset_name, config_file_list=props, config_dict=kwargs)
     init_seed(config['seed'], config['reproducibility'])
+    
     # logger initialization
     init_logger(config)
     logger = getLogger()
@@ -61,7 +52,7 @@ def evaluate(model_name, dataset_name, model_path, **kwargs):
     train_data, valid_data, test_data = data_preparation(config, dataset)
     
     config_file = os.path.join(f'configs/{model_name}.json')
-    parser = HfArgumentParser((ModelConfig, TrainingArguments))
+    parser = HfArgumentParser((ModelConfig, ))
     model_config, _ = parser.parse_json_file(json_file=config_file)
 
     logger.info(f"Loaded model: {model_config.model_to_train}")
